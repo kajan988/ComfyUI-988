@@ -10,4 +10,4 @@ Repository = "https://github.com/kajan988/ComfyUI-988"
 [tool.comfy]
 PublisherId = "988"
 DisplayName = "ComfyUI-988"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/kajan988/ComfyUI-988/main/logo.png"

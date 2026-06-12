@@ -30,6 +30,8 @@ Este proyecto contiene código adaptado de:
 | **Sequence Generator 988** | 🦇988/Number | Generate a sequence of numbers. Syntax: `x...y+z` (step), `x...y#z` (evenly spaced), `x,y,z` (literal list). |
 | **Simple Config 988** | 🦇988/Utility | Select a sampler and scheduler to pass their string values as individual outputs. |
 | **Display UI 988** | 🦇988/Utility | Display any input value as a read-only text box on the node. Accepts strings, numbers, or any wire type. |
+| **Pipe IN 988** | 🦇988/Utility | Bundle up to 10 signals of any type into a single PIPE. Autogrow inputs — 2 by default, expands up to 10 as you connect. Auto-detects and displays type + colour on each input socket. |
+| **Pipe OUT 988** | 🦇988/Utility | Unpack a PIPE from Pipe IN 988 back into individual signals. Outputs restore the original order, types, colours, and labels. |
 
 ## Installation
 
@@ -60,6 +62,9 @@ ComfyUI-988/
 │   ├── node_sequence_generator.py  #   Sequence Generator 988
 │   ├── node_simple_config.py       #   Simple Config 988
 │   ├── node_display_ui.py          #   Display UI 988
+│   ├── node_pipe_merge.py          #   Pipe IN 988
+│   ├── node_pipe_unpack.py         #   Pipe OUT 988
+│   ├── _pipe_utils.py       #   Pipe/Bus utilities
 │   ├── _config_manager.py   #   Configuration management
 │   ├── _model_fetcher.py    #   LM Studio model cache
 │   ├── _type_helpers.py     #   Shared type utilities
@@ -73,6 +78,8 @@ ComfyUI-988/
 │   └── steudio/
 │       ├── index.js         #   Extension entry point
 │       └── show_text.mjs    #   Display UI support
+│   └── pipe/
+│       └── index.js         #   Pipe IN/OUT: autogrow + type colouring
 ├── config/                  # Configuration files
 │   ├── default_config.json
 │   ├── system_message_templates.json

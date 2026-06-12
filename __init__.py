@@ -16,6 +16,8 @@ Currently includes:
   - Simple Config 988        — sampler config passthrough
   - Display UI 988           — show any value as text
   - Load Images into List 988 — batch load from folder
+  - Pipe IN 988               — bundle multiple signals into a single PIPE
+  - Pipe OUT 988              — split a PIPE back into individual signals
 """
 
 from .nodes.node_lm_studio import NODE_CLASS_MAPPINGS as _MAPS_LM
@@ -44,6 +46,10 @@ from .nodes.node_display_ui import NODE_CLASS_MAPPINGS as _MAPS_DISPLAY
 from .nodes.node_display_ui import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_DISPLAY
 from .nodes.node_load_images_list import NODE_CLASS_MAPPINGS as _MAPS_LOAD
 from .nodes.node_load_images_list import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_LOAD
+from .nodes.node_pipe_merge import NODE_CLASS_MAPPINGS as _MAPS_PIPE_IN
+from .nodes.node_pipe_merge import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_PIPE_IN
+from .nodes.node_pipe_unpack import NODE_CLASS_MAPPINGS as _MAPS_PIPE_OUT
+from .nodes.node_pipe_unpack import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_PIPE_OUT
 
 NODE_CLASS_MAPPINGS = {
     **_MAPS_LM, **_MAPS_UNLOAD,
@@ -51,6 +57,7 @@ NODE_CLASS_MAPPINGS = {
     **_MAPS_RCALC, **_MAPS_RSIZE,
     **_MAPS_SEED, **_MAPS_SEQ,
     **_MAPS_CONFIG, **_MAPS_DISPLAY, **_MAPS_LOAD,
+    **_MAPS_PIPE_IN, **_MAPS_PIPE_OUT,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -59,6 +66,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_NAMES_RCALC, **_NAMES_RSIZE,
     **_NAMES_SEED, **_NAMES_SEQ,
     **_NAMES_CONFIG, **_NAMES_DISPLAY, **_NAMES_LOAD,
+    **_NAMES_PIPE_IN, **_NAMES_PIPE_OUT,
 }
 
 WEB_DIRECTORY = "./js"

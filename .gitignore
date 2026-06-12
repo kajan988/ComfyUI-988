@@ -21,6 +21,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+node.zip
 
 # Environments
 .env

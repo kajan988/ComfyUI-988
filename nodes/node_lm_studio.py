@@ -273,6 +273,14 @@ class LMStudio988:
             for k, v in kwargs.items():
                 if k in exclude:
                     continue
+                # Normalize model selection values: strip display decorations
+                # (👁️ emoji, variation selector, extra whitespace) so that
+                # "model  👁️" and "model" produce the same canonical string.
+                # The frontend's async option refresh can cause the widget
+                # value to drift across different display formats of the same
+                # model; canonicalising here keeps the fingerprint stable.
+                if k in ("model_selection", "draft_model_selection") and isinstance(v, str):
+                    v = resolve_model_id(v)
                 # Defensively handle non-serializable types via str()
                 try:
                     json.dumps(v)

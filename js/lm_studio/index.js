@@ -84,7 +84,13 @@ app.registerExtension({
             refreshWidget.value = false;
             refreshWidget.callback = _cb;
 
-            // Pre-populate dropdowns on node creation / page load
+            // Pre-populate dropdowns on node creation / page load.
+            // After refreshing the server-side cache, update the combo options AND
+            // restore the previously selected widget value by matching on the
+            // normalized (emoji-stripped) model ID.  This prevents the widget's
+            // internal index-based selection from drifting when the options array
+            // is replaced — a common ComfyUI/LiteGraph combo pitfall that breaks
+            // IS_CHANGED-based caching (see #1 below).
             (async () => {
                 try {
                     const resp = await api.fetchApi("/988/lm_studio/refresh_models", { method: "POST" });
@@ -92,9 +98,31 @@ app.registerExtension({
                     if (data.success && data.models) {
                         for (const name of ["model_selection", "draft_model_selection"]) {
                             const w = node.widgets?.find(ww => ww.name === name);
-                            if (w && w.options) {
-                                w.options.values = ["-- Custom (enter below) --", ...data.models];
+                            if (!w || !w.options) continue;
+
+                            // ── #1 Preserve value across options replacement ──
+                            // Strip 👁 and variation selector for canonical matching.
+                            const stripEmoji = (s) => ("" + s)
+                                .replace(/\uD83D\uDC41\uFE0F/g, "")
+                                .replace(/\uFE0F/g, "")
+                                .trim();
+
+                            const prevValue = w.value;
+                            const newValues = ["-- Custom (enter below) --", ...data.models];
+                            w.options.values = newValues;
+
+                            // Try canonical-ID match first, then exact match fallback.
+                            const canonicalPrev = stripEmoji(prevValue);
+                            let matchIdx = newValues.findIndex(
+                                v => stripEmoji(v) === canonicalPrev
+                            );
+                            if (matchIdx === -1) {
+                                matchIdx = newValues.indexOf(prevValue);
                             }
+                            if (matchIdx >= 0) {
+                                w.value = newValues[matchIdx];
+                            }
+                            // If no match found, leave the widget's default fallback.
                         }
                     }
                 } catch (_) { /* first load may fail */ }

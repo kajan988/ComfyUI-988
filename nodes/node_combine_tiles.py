@@ -13,7 +13,6 @@ class CombineTiles988:
                 "images": ("IMAGE",),
                 "dac_data": ("DAC_DATA",),
             },
-            "input_is_list": True,
         }
 
     INPUT_IS_LIST = True

@@ -8,6 +8,6 @@ license = {file = "LICENSE"}
 Repository = "https://github.com/kajan988/ComfyUI-988"
 
 [tool.comfy]
-PublisherId = "@kajan988"
+PublisherId = "kajan988"
 DisplayName = "ComfyUI-988"
 Icon = "https://raw.githubusercontent.com/kajan988/ComfyUI-988/main/logo.png"

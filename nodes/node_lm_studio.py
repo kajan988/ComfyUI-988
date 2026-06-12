@@ -9,6 +9,7 @@ message templates.
 import json
 import logging
 import re
+import copy
 from typing import Optional, Tuple, List
 import os
 import time
@@ -79,29 +80,60 @@ GPT_OSS_FINAL_PATTERN = r"<\|channel\|>final<\|message\|>(.*?)$"
 
 TEMPLATES_FILE = Path(__file__).parent.parent / "config" / "system_message_templates.json"
 
+# Module-level cache for template choices to reduce file I/O and prevent
+# combo list changes between prompt executions.
+_template_cache_names: List[str] = ["OFF"]
+_template_cache_map: dict = {"OFF": ""}
+_template_cache_mtime: float = 0.0
 
-def get_template_choices():
+
+def get_template_choices(force_reload: bool = False):
     """Load system message templates from the JSON file.
+
+    Results are cached at module level to avoid unnecessary file I/O
+    and to prevent the combo list from changing between executions
+    (which can break ComfyUI's caching).
+
+    Args:
+        force_reload: If True, force re-read from file even if cached.
 
     Returns:
         Tuple of (list_of_names, dict_of_name_to_content).
         Always includes at least "OFF" with empty content.
     """
-    names = []
-    content_map = {}
+    global _template_cache_names, _template_cache_map, _template_cache_mtime
+
+    try:
+        current_mtime = TEMPLATES_FILE.stat().st_mtime
+    except OSError:
+        current_mtime = 0.0
+
+    if not force_reload and current_mtime <= _template_cache_mtime:
+        return list(_template_cache_names), dict(_template_cache_map)
+
     try:
         with open(TEMPLATES_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        names = []
+        content_map = {}
         for t in data.get("templates", []):
             name = t.get("name", "UNNAMED")
             content = t.get("content", "")
             names.append(name)
             content_map[name] = content
+        if not names:
+            names = ["OFF"]
+            content_map = {"OFF": ""}
+        _template_cache_names = names
+        _template_cache_map = content_map
+        _template_cache_mtime = current_mtime
     except Exception as e:
         logger.warning(f"Failed to load system message templates: {e}")
-        names = ["OFF"]
-        content_map = {"OFF": ""}
-    return names, content_map
+        if not _template_cache_names:
+            _template_cache_names = ["OFF"]
+            _template_cache_map = {"OFF": ""}
+
+    return list(_template_cache_names), dict(_template_cache_map)
 
 
 class LMStudio988:
@@ -231,11 +263,31 @@ class LMStudio988:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs) -> str:
+        # When refresh_models is toggled ON, return a truly unique value
+        # so the node ALWAYS re-executes (not a constant string).
         if kwargs.get("refresh_models", False):
-            return str(float("nan"))
+            return f"__refresh__{time.time()}"
+
         exclude = {"refresh_models", "image1", "image2", "image3", "image4"}
-        fingerprint = {k: v for k, v in kwargs.items() if k not in exclude}
-        return json.dumps(fingerprint, sort_keys=True, default=str)
+        try:
+            fingerprint = {}
+            for k, v in kwargs.items():
+                if k in exclude:
+                    continue
+                # Defensively handle non-serializable types via str()
+                try:
+                    json.dumps(v)
+                    fingerprint[k] = v
+                except (TypeError, ValueError):
+                    fingerprint[k] = str(v)
+
+            return json.dumps(fingerprint, sort_keys=True)
+        except Exception as e:
+            # If fingerprinting itself fails, log it and return a unique
+            # value so the node re-executes (safe fallback).
+            logger.error(f"IS_CHANGED fingerprint failed: {type(e).__name__}: {e}")
+            logger.debug(f"IS_CHANGED kwargs: {kwargs}")
+            return f"__fallback__{time.time()}_{id(kwargs)}"
 
     def _resolve_model_identifier(
         self, selection: str, custom_name: str, field_name: str

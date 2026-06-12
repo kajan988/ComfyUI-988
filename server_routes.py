@@ -5,7 +5,7 @@ Registered as side-effect import in __init__.py.
 from aiohttp import web
 from server import PromptServer
 
-from .nodes._model_fetcher import refresh_model_cache, get_model_display_choices, CUSTOM_MODEL_OPTION
+from .nodes._model_fetcher import refresh_model_cache, get_model_choices, CUSTOM_MODEL_OPTION
 from .nodes._config_manager import ConfigManager
 
 
@@ -17,9 +17,12 @@ async def refresh_models_route(request):
     timeout = config_manager.get_timeout()
     excluded_patterns = config_manager.get_excluded_patterns()
 
+    print(f"[988] refresh_models_route called — server={server_url}, timeout={timeout}")
+
     success, message = refresh_model_cache(server_url, timeout, excluded_patterns=excluded_patterns)
-    choices = get_model_display_choices()
-    models = [m for m in choices if m != CUSTOM_MODEL_OPTION]
+    models = get_model_choices()[1:]  # skip CUSTOM_MODEL_OPTION
+
+    print(f"[988] refresh_models_route result — success={success}, message='{message}', models={len(models)}")
 
     return web.json_response({
         "success": success,

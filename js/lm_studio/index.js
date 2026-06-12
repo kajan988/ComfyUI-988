@@ -1,7 +1,5 @@
-import { app } from "../../scripts/app.js";
-import { api } from "../../scripts/api.js";
-import { refreshModelList } from "./model_refresh.mjs";
-import { refreshTemplateDropdown } from "./templates.mjs";
+import { app } from "/scripts/app.js";
+import { api } from "/scripts/api.js";
 
 /*
  * LM Studio 988 — Model Refresh Extension
@@ -19,104 +17,88 @@ import { refreshTemplateDropdown } from "./templates.mjs";
 app.registerExtension({
     name: "988.LMStudio",
 
-    async nodeCreated(node) {
-        if (node.comfyClass !== "LMStudio988") return;
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== "LMStudio988") return;
 
-        const refreshWidget = node.widgets?.find(w => w.name === "refresh_models");
-        if (!refreshWidget) return;
+        const orig = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            orig?.apply(this, arguments);
 
-        // Refresh models and templates on node creation (page load / node add)
-        (async () => {
-            try {
-                const modelData = await refreshModelList(api);
-                if (modelData.success && modelData.models) {
-                    const choices = ["-- Custom (enter below) --", ...modelData.models];
-                    for (const widgetName of ["model_selection", "draft_model_selection"]) {
-                        const w = node.widgets?.find(ww => ww.name === widgetName);
-                        if (w && w.options) {
-                            w.options.values = choices;
-                            if (!choices.includes(w.value)) {
-                                w.value = choices[0];
+            const node = this;
+            const refreshWidget = node.widgets?.find(w => w.name === "refresh_models");
+            if (!refreshWidget) return;
+
+            const origCB = refreshWidget.callback;
+
+            refreshWidget.callback = async function (value) {
+                if (!value) {
+                    if (origCB) origCB.call(this, value);
+                    return;
+                }
+
+                // Refresh model dropdowns
+                try {
+                    const resp = await api.fetchApi("/988/lm_studio/refresh_models", { method: "POST" });
+                    const data = await resp.json();
+                    if (data.success && data.models) {
+                        for (const name of ["model_selection", "draft_model_selection"]) {
+                            const w = node.widgets?.find(ww => ww.name === name);
+                            if (w && w.options) {
+                                w.options.values = ["-- Custom (enter below) --", ...data.models];
+                                if (!w.options.values.includes(w.value)) {
+                                    w.value = w.options.values[0];
+                                }
                             }
                         }
                     }
-                }
-            } catch (err) {
-                // Silently fail on first load
-            }
-        })();
+                } catch (e) { console.error("[988] Model refresh error:", e); }
 
-        (async () => {
-            try {
-                const data = await refreshTemplateDropdown(api);
-                if (data?.templates) {
-                    const w = node.widgets?.find(ww => ww.name === "default_system_message");
-                    if (w && w.options) {
-                        const names = data.templates.map(t => t.name);
-                        w.options.values = names;
-                        if (!names.includes(w.value)) {
-                            w.value = names[0];
-                        }
-                    }
-                }
-            } catch (err) {
-                // Silently fail on first load
-            }
-        })();
-
-        const originalCallback = refreshWidget.callback;
-
-        refreshWidget.callback = async function (value) {
-            if (!value) {
-                if (originalCallback) originalCallback.call(this, value);
-                return;
-            }
-
-            try {
-                const data = await refreshModelList(api);
-                if (data.success && data.models) {
-                    const choices = ["-- Custom (enter below) --", ...data.models];
-
-                    for (const widgetName of ["model_selection", "draft_model_selection"]) {
-                        const w = node.widgets?.find(ww => ww.name === widgetName);
+                // Refresh template dropdown
+                try {
+                    const resp = await api.fetchApi("/988/lm_studio/refresh_templates", { method: "POST" });
+                    const tmpl = await resp.json();
+                    if (tmpl?.templates) {
+                        const w = node.widgets?.find(ww => ww.name === "default_system_message");
                         if (w && w.options) {
-                            w.options.values = choices;
-                            if (!choices.includes(w.value)) {
-                                w.value = choices[0];
+                            const names = tmpl.templates.map(t => t.name);
+                            w.options.values = names;
+                            if (!names.includes(w.value)) {
+                                w.value = names[0];
                             }
                         }
                     }
+                } catch (e) { console.error("[988] Template refresh error:", e); }
 
-                    console.log(`[988] Refreshed models: ${data.models.length} found`);
-                } else {
-                    console.warn(`[988] Model refresh failed: ${data.message || "unknown error"}`);
-                }
-            } catch (err) {
-                console.error("[988] Failed to refresh models:", err);
-            }
+                // Toggle back off (silent — no callback to avoid Vue/Node 2.0 re-render)
+                const _cb = refreshWidget.callback;
+                refreshWidget.callback = null;
+                refreshWidget.value = false;
+                refreshWidget.callback = _cb;
 
-            // Also refresh template dropdown
-            try {
-                const tmplData = await refreshTemplateDropdown(api);
-                if (tmplData?.templates) {
-                    const tmplWidget = node.widgets?.find(w => w.name === "default_system_message");
-                    if (tmplWidget && tmplWidget.options) {
-                        const tmplNames = tmplData.templates.map(t => t.name);
-                        tmplWidget.options.values = tmplNames;
-                        if (!tmplNames.includes(tmplWidget.value)) {
-                            tmplWidget.value = tmplNames[0];
-                        }
-                    }
-                    console.log(`[988] Refreshed templates: ${tmplData.templates.length} loaded`);
-                }
-            } catch (err) {
-                console.error("[988] Failed to refresh templates:", err);
-            }
+                if (origCB) origCB.call(this, false);
+            };
 
-            // Toggle back off so it acts like a one-shot button
+            // Force initial value to false (silent)
+            const _cb = refreshWidget.callback;
+            refreshWidget.callback = null;
             refreshWidget.value = false;
+            refreshWidget.callback = _cb;
 
-            if (originalCallback) originalCallback.call(this, false);
+            // Pre-populate dropdowns on node creation / page load
+            (async () => {
+                try {
+                    const resp = await api.fetchApi("/988/lm_studio/refresh_models", { method: "POST" });
+                    const data = await resp.json();
+                    if (data.success && data.models) {
+                        for (const name of ["model_selection", "draft_model_selection"]) {
+                            const w = node.widgets?.find(ww => ww.name === name);
+                            if (w && w.options) {
+                                w.options.values = ["-- Custom (enter below) --", ...data.models];
+                            }
+                        }
+                    }
+                } catch (_) { /* first load may fail */ }
+            })();
         };
     },
 });

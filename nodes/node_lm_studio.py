@@ -24,7 +24,7 @@ import comfy.model_management as model_management
 
 from ._config_manager import ConfigManager
 from ._model_fetcher import (
-    get_model_display_choices,
+    get_model_choices,
     resolve_model_id,
     initialize_model_cache,
     validate_model_identifier,
@@ -155,7 +155,7 @@ class LMStudio988:
 
     @classmethod
     def INPUT_TYPES(cls):
-        model_choices = get_model_display_choices()
+        model_choices = get_model_choices()
         default_model = model_choices[0] if model_choices else CUSTOM_MODEL_OPTION
         template_names, _ = get_template_choices()
 
@@ -296,7 +296,10 @@ class LMStudio988:
                 return None, None
             model_id = custom_name.strip()
         else:
+            # Strip 👁️ emoji if present to get the plain model ID
             model_id = resolve_model_id(selection)
+        if not model_id:
+            return None, None
         is_valid, error = validate_model_identifier(model_id)
         if not is_valid:
             return None, f"Invalid {field_name}: {error}"

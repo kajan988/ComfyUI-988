@@ -25,7 +25,6 @@ import comfy.model_management as model_management
 from ._config_manager import ConfigManager
 from ._model_fetcher import (
     get_model_display_choices,
-    refresh_model_cache,
     resolve_model_id,
     initialize_model_cache,
     validate_model_identifier,
@@ -407,18 +406,12 @@ class LMStudio988:
 
         config = _config_manager.get_config()
         server_url = _config_manager.get_server_url()
-        timeout = _config_manager.get_timeout()
-        excluded_patterns = config.get("excluded_model_patterns", [])
 
         troubleshooting_lines.append(f"[INFO] Server: {server_url}")
         troubleshooting_lines.append(f"[INFO] Cached models: {get_cached_model_count()}")
 
         if refresh_models:
-            success, message = refresh_model_cache(server_url, timeout, excluded_patterns=excluded_patterns)
-            if success:
-                troubleshooting_lines.append(f"[INFO] Model refresh: {message}")
-            else:
-                troubleshooting_lines.append(f"[WARNING] Model refresh failed: {message}")
+            troubleshooting_lines.append("[INFO] Model refresh triggered — updated via frontend API call")
 
         last_error = get_last_fetch_error()
         if last_error and not get_last_fetch_success():

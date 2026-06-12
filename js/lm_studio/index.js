@@ -25,7 +25,27 @@ app.registerExtension({
         const refreshWidget = node.widgets?.find(w => w.name === "refresh_models");
         if (!refreshWidget) return;
 
-        // Refresh templates on node creation (page load / node add)
+        // Refresh models and templates on node creation (page load / node add)
+        (async () => {
+            try {
+                const modelData = await refreshModelList(api);
+                if (modelData.success && modelData.models) {
+                    const choices = ["-- Custom (enter below) --", ...modelData.models];
+                    for (const widgetName of ["model_selection", "draft_model_selection"]) {
+                        const w = node.widgets?.find(ww => ww.name === widgetName);
+                        if (w && w.options) {
+                            w.options.values = choices;
+                            if (!choices.includes(w.value)) {
+                                w.value = choices[0];
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                // Silently fail on first load
+            }
+        })();
+
         (async () => {
             try {
                 const data = await refreshTemplateDropdown(api);

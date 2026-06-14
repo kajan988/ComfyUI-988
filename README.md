@@ -2,15 +2,13 @@
 
 Collection of useful ComfyUI nodes.
 
-## 🦇 988
+## 🦇 988 Kajan nodes
 
-Este proyecto está bajo **GNU General Public License v3**. Ver [LICENSE](LICENSE).
+### Responsibilities
 
-### Attribuciones
+This project contains code adapted from:
 
-Este proyecto contiene código adaptado de:
-
-| Proyecto original | Autor | Licencia | Archivos adaptados |
+| Original project | Author | Licence | Adapted files |
 |-------------------|-------|----------|-------------------|
 | [EA_LMStudio](https://github.com/EnragedAntelope/EA_LMStudio) | EnragedAntelope | MIT | `node_lm_studio.py`, `node_llm_unload.py`, `_model_fetcher.py`, `_config_manager.py` |
 | [ComfyUI_Steudio](https://github.com/Steudio/ComfyUI_Steudio) | Steudio | GPL v3 | `node_dac_algorithm.py`, `node_divide_image_select.py`, `node_combine_tiles.py`, `node_dac_data_scale.py`, `node_display_ui.py`, `js/steudio/` |
@@ -18,7 +16,7 @@ Este proyecto contiene código adaptado de:
 | Node | Subcategory | Description |
 |------|-------------|-------------|
 | **LM Studio 988** | 🦇988/LM Studio | Text generation using local LLM/VLM models via LM Studio server. Supports vision (multi-image), reasoning extraction (DeepSeek, Qwen, QwQ, GLM, GPT-OSS), draft models for speculative decoding, and system message templates. |
-| **LM Unload 988** | 🦇988/LM Studio | Passthrough node that unloads LLM models from LM Studio and/or clears ComfyUI VRAM. |
+| **LM Unload 988** | 🦇988/LM Studio | OPTIONAL Passthrough node that unloads LLM models from LM Studio and/or clears ComfyUI VRAM. |
 | **DaC Algorithm 988** | 🦇988/Image | Calculate optimal upscale dimensions while maintaining minimum tile overlap and scale factor constraints. Optionally upscale with a model before tiling. |
 | **Divide Image Select 988** | 🦇988/Image | Divide the upscaled image into tiles using coordinates from DaC Algorithm. `tile=0` returns all tiles, `tile=N` returns a single tile. |
 | **Combine Tiles 988** | 🦇988/Image | Combine processed tiles back into a single image using Gaussian-blurred overlap masks for seamless blending. |

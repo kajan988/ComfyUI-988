@@ -1,4 +1,4 @@
-"""DaC Algorithm 988 — optimal tile-based upscaling with overlap control."""
+"""DaC Algorithm 988 � optimal tile-based upscaling with overlap control."""
 import math
 import torch
 import comfy.utils
@@ -16,7 +16,7 @@ class DaCAlgorithm988:
                 "image": ("IMAGE",),
                 "tile_width": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
                 "tile_height": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
-                "min_overlap": (list(OVERLAP_DICT.keys()), {"default": "1/32 Tile"}),
+                "min_overlap": (list(OVERLAP_DICT.keys()), {"default": "3%"}),
                 "min_scale_factor": ("FLOAT", {"default": 3.0, "min": 1.0, "max": 8.0}),
                 "tile_order": (list(TILE_ORDER_DICT.keys()), {"default": "spiral"}),
                 "scaling_method": (SCALING_METHODS, {"default": "lanczos"}),

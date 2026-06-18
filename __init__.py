@@ -12,10 +12,14 @@ from .nodes.node_llm_unload import NODE_CLASS_MAPPINGS as _MAPS_UNLOAD
 from .nodes.node_llm_unload import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_UNLOAD
 from .nodes.node_dac_algorithm import NODE_CLASS_MAPPINGS as _MAPS_DAC
 from .nodes.node_dac_algorithm import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_DAC
+from .nodes.node_dac_algorithm_v2 import NODE_CLASS_MAPPINGS as _MAPS_DAC_V2
+from .nodes.node_dac_algorithm_v2 import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_DAC_V2
 from .nodes.node_divide_image_select import NODE_CLASS_MAPPINGS as _MAPS_DIVIDE
 from .nodes.node_divide_image_select import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_DIVIDE
 from .nodes.node_combine_tiles import NODE_CLASS_MAPPINGS as _MAPS_COMBINE
 from .nodes.node_combine_tiles import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_COMBINE
+from .nodes.node_combine_tiles_v2 import NODE_CLASS_MAPPINGS as _MAPS_COMBINE_V2
+from .nodes.node_combine_tiles_v2 import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_COMBINE_V2
 from .nodes.node_dac_data_scale import NODE_CLASS_MAPPINGS as _MAPS_DSCALE
 from .nodes.node_dac_data_scale import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_DSCALE
 from .nodes.node_ratio_calculator import NODE_CLASS_MAPPINGS as _MAPS_RCALC
@@ -39,7 +43,7 @@ from .nodes.node_pipe_unpack import NODE_DISPLAY_NAME_MAPPINGS as _NAMES_PIPE_OU
 
 NODE_CLASS_MAPPINGS = {
     **_MAPS_LM, **_MAPS_UNLOAD,
-    **_MAPS_DAC, **_MAPS_DIVIDE, **_MAPS_COMBINE, **_MAPS_DSCALE,
+    **_MAPS_DAC, **_MAPS_DAC_V2, **_MAPS_DIVIDE, **_MAPS_COMBINE, **_MAPS_COMBINE_V2, **_MAPS_DSCALE,
     **_MAPS_RCALC, **_MAPS_RSIZE,
     **_MAPS_SEED, **_MAPS_SEQ,
     **_MAPS_CONFIG, **_MAPS_DISPLAY, **_MAPS_LOAD,
@@ -48,7 +52,7 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     **_NAMES_LM, **_NAMES_UNLOAD,
-    **_NAMES_DAC, **_NAMES_DIVIDE, **_NAMES_COMBINE, **_NAMES_DSCALE,
+    **_NAMES_DAC, **_NAMES_DAC_V2, **_NAMES_DIVIDE, **_NAMES_COMBINE, **_NAMES_COMBINE_V2, **_NAMES_DSCALE,
     **_NAMES_RCALC, **_NAMES_RSIZE,
     **_NAMES_SEED, **_NAMES_SEQ,
     **_NAMES_CONFIG, **_NAMES_DISPLAY, **_NAMES_LOAD,

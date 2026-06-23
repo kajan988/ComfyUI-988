@@ -81,8 +81,8 @@ TEMPLATES_FILE = Path(__file__).parent.parent / "config" / "system_message_templ
 
 # Module-level cache for template choices to reduce file I/O and prevent
 # combo list changes between prompt executions.
-_template_cache_names: List[str] = ["OFF"]
-_template_cache_map: dict = {"OFF": ""}
+_template_cache_names: List[str] = ["\U0001f6abOFF"]
+_template_cache_map: dict = {"\U0001f6abOFF": ""}
 _template_cache_mtime: float = 0.0
 
 
@@ -98,7 +98,7 @@ def get_template_choices(force_reload: bool = False):
 
     Returns:
         Tuple of (list_of_names, dict_of_name_to_content).
-        Always includes at least "OFF" with empty content.
+        Always includes at least "\U0001f6abOFF" with empty content.
     """
     global _template_cache_names, _template_cache_map, _template_cache_mtime
 
@@ -121,16 +121,16 @@ def get_template_choices(force_reload: bool = False):
             names.append(name)
             content_map[name] = content
         if not names:
-            names = ["OFF"]
-            content_map = {"OFF": ""}
+            names = ["\U0001f6abOFF"]
+            content_map = {"\U0001f6abOFF": ""}
         _template_cache_names = names
         _template_cache_map = content_map
         _template_cache_mtime = current_mtime
     except Exception as e:
         logger.warning(f"Failed to load system message templates: {e}")
         if not _template_cache_names:
-            _template_cache_names = ["OFF"]
-            _template_cache_map = {"OFF": ""}
+            _template_cache_names = ["\U0001f6abOFF"]
+            _template_cache_map = {"\U0001f6abOFF": ""}
 
     return list(_template_cache_names), dict(_template_cache_map)
 
@@ -167,7 +167,7 @@ class LMStudio988:
                     "tooltip": "System prompt that defines the LLM's role and behavior.",
                 }),
                 "default_system_message": (template_names, {
-                    "default": "OFF",
+                    "default": "\U0001f6abOFF",
                     "tooltip": "Select a predefined system message template to append after your custom system message.",
                 }),
                 "prompt": ("STRING", {
@@ -281,6 +281,9 @@ class LMStudio988:
                 # model; canonicalising here keeps the fingerprint stable.
                 if k in ("model_selection", "draft_model_selection") and isinstance(v, str):
                     v = resolve_model_id(v)
+                if k == "default_system_message" and isinstance(v, str):
+                    _, template_content_map = get_template_choices()
+                    v = template_content_map.get(v, v)
                 # Defensively handle non-serializable types via str()
                 try:
                     json.dumps(v)

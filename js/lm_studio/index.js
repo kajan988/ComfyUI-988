@@ -25,6 +25,9 @@ app.registerExtension({
             orig?.apply(this, arguments);
 
             const node = this;
+            const stripAllEmoji = (s) => ("" + s)
+                .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\uFE0F/g, "")
+                .trim();
             const refreshWidget = node.widgets?.find(w => w.name === "refresh_models");
             if (!refreshWidget) return;
 
@@ -53,17 +56,23 @@ app.registerExtension({
                     }
                 } catch (e) { console.error("[988] Model refresh error:", e); }
 
-                // Refresh template dropdown
+                // Refresh template dropdown with canonical match
                 try {
                     const resp = await api.fetchApi("/988/lm_studio/refresh_templates", { method: "POST" });
                     const tmpl = await resp.json();
                     if (tmpl?.templates) {
                         const w = node.widgets?.find(ww => ww.name === "default_system_message");
                         if (w && w.options) {
+                            const prevValue = w.value;
                             const names = tmpl.templates.map(t => t.name);
                             w.options.values = names;
-                            if (!names.includes(w.value)) {
-                                w.value = names[0];
+                            const canonicalPrev = stripAllEmoji(prevValue);
+                            let matchIdx = names.findIndex(v => stripAllEmoji(v) === canonicalPrev);
+                            if (matchIdx === -1) {
+                                matchIdx = names.indexOf(prevValue);
+                            }
+                            if (matchIdx >= 0) {
+                                w.value = names[matchIdx];
                             }
                         }
                     }
@@ -85,14 +94,15 @@ app.registerExtension({
             refreshWidget.callback = _cb;
 
             // Pre-populate dropdowns on node creation / page load.
-            // After refreshing the server-side cache, update the combo options AND
+            // After refreshing the server-side cache, update combo options AND
             // restore the previously selected widget value by matching on the
-            // normalized (emoji-stripped) model ID.  This prevents the widget's
+            // emoji-stripped canonical form.  This prevents the widget's
             // internal index-based selection from drifting when the options array
             // is replaced — a common ComfyUI/LiteGraph combo pitfall that breaks
-            // IS_CHANGED-based caching (see #1 below).
+            // IS_CHANGED-based caching.
             (async () => {
                 try {
+                    // ── Model combos ──
                     const resp = await api.fetchApi("/988/lm_studio/refresh_models", { method: "POST" });
                     const data = await resp.json();
                     if (data.success && data.models) {
@@ -100,21 +110,13 @@ app.registerExtension({
                             const w = node.widgets?.find(ww => ww.name === name);
                             if (!w || !w.options) continue;
 
-                            // ── #1 Preserve value across options replacement ──
-                            // Strip 👁 and variation selector for canonical matching.
-                            const stripEmoji = (s) => ("" + s)
-                                .replace(/\uD83D\uDC41\uFE0F/g, "")
-                                .replace(/\uFE0F/g, "")
-                                .trim();
-
                             const prevValue = w.value;
                             const newValues = ["-- Custom (enter below) --", ...data.models];
                             w.options.values = newValues;
 
-                            // Try canonical-ID match first, then exact match fallback.
-                            const canonicalPrev = stripEmoji(prevValue);
+                            const canonicalPrev = stripAllEmoji(prevValue);
                             let matchIdx = newValues.findIndex(
-                                v => stripEmoji(v) === canonicalPrev
+                                v => stripAllEmoji(v) === canonicalPrev
                             );
                             if (matchIdx === -1) {
                                 matchIdx = newValues.indexOf(prevValue);
@@ -122,7 +124,26 @@ app.registerExtension({
                             if (matchIdx >= 0) {
                                 w.value = newValues[matchIdx];
                             }
-                            // If no match found, leave the widget's default fallback.
+                        }
+                    }
+
+                    // ── Template combo ──
+                    const tresp = await api.fetchApi("/988/lm_studio/refresh_templates", { method: "POST" });
+                    const tmpl = await tresp.json();
+                    if (tmpl?.templates) {
+                        const w = node.widgets?.find(ww => ww.name === "default_system_message");
+                        if (w && w.options) {
+                            const prevValue = w.value;
+                            const names = tmpl.templates.map(t => t.name);
+                            w.options.values = names;
+                            const canonicalPrev = stripAllEmoji(prevValue);
+                            let matchIdx = names.findIndex(v => stripAllEmoji(v) === canonicalPrev);
+                            if (matchIdx === -1) {
+                                matchIdx = names.indexOf(prevValue);
+                            }
+                            if (matchIdx >= 0) {
+                                w.value = names[matchIdx];
+                            }
                         }
                     }
                 } catch (_) { /* first load may fail */ }

@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-988"
 description = "A feature-rich node pack for ComfyUI. Includes LM Studio integration for local LLM/VLM text generation (streaming, vision, custom endpoints), DaC (Divide and Conquer) algorithm for optimal tile-based image upscaling with intelligent overlap and blending, image tiling/combining utilities, aspect ratio calculator and converter, seed shifter with batch generation, arithmetic sequence generator, sampler config passthrough, batch image loading from folder, and a generic display node for visualizing any value as UI text output."
-version = "1.1.5"
+version = "1.1.6"
 license = {file = "LICENSE"}
 
 [project.urls]

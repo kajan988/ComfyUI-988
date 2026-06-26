@@ -3,13 +3,16 @@ import { app } from "/scripts/app.js";
 // ── Node IDs ──
 const PIPE_IN = "PipeIN988";
 const PIPE_OUT = "PipeOUT988";
+const PIPE_TYPE = "PIPE988";
 
 // ── Slot limits ──
 const MAX_SLOTS = 10;
-const MIN_SLOTS = 2;
+const MIN_SLOTS = 1;
+const PIPE_SLOT = 0;
 
 // ── Colour map (fallback when LGraphCanvas.link_type_colors lacks an entry) ──
 const FALLBACK_COLORS = {
+    PIPE988:         [0.659, 0.478, 0.831],
     IMAGE:          [0.247, 0.494, 0.871],
     MASK:           [0.694, 0.831, 0.184],
     LATENT:         [0.831, 0.153, 0.486],
@@ -31,7 +34,6 @@ const FALLBACK_COLORS = {
 
 // ── Helpers ──
 
-/** Resolve the colour for a type string: LiteGraph's built-in map first, then ours. */
 function colorForType(type) {
     if (!type || type === "*") return null;
     const fromLG = LGraphCanvas?.link_type_colors?.[type];
@@ -39,22 +41,19 @@ function colorForType(type) {
     return FALLBACK_COLORS[type] || null;
 }
 
-/**
- * Update a single slot (input or output) so its type + label reflect the
- * connected signal.  The socket colour is derived automatically from
- * LGraphCanvas.link_type_colors[slot.type] — we NEVER set slot.color.
- *
- *   typeName = concrete type string ("IMAGE", "MASK", …) or null/undefined/"*"
- */
-function paintSlot(slot, typeName) {
+function paintSlot(slot, typeName, sourceName) {
     if (!slot) return;
+    const isPipe = slot.type === PIPE_TYPE;
+    if (isPipe) return;
     const isConcrete = typeName && typeName !== "*" && typeName !== "ANY";
     slot.type = isConcrete ? typeName : "*";
-    const label = isConcrete ? typeName : "ANY";
-    if (slot.label !== label) slot.label = label;
+    const label = isConcrete ? (sourceName || typeName) : "ANY";
+    if (slot.label !== label) {
+        slot.label = label;
+        slot.name = label;
+    }
 }
 
-/** Colour the link wire so it matches the resolved type. */
 function paintLink(graph, linkId, typeName) {
     if (!graph || linkId == null) return;
     const link = graph.links[linkId];
@@ -64,7 +63,7 @@ function paintLink(graph, linkId, typeName) {
 }
 
 // ──────────────────────────────────
-//  Pipe IN 988  — autogrow + colour
+//  Pipe IN 988  — autogrow inputs + colour + single pipe output
 // ──────────────────────────────────
 app.registerExtension({
     name: "988.Pipe",
@@ -74,76 +73,159 @@ app.registerExtension({
 
         // ──────── Pipe IN ────────
         if (nodeData.name === PIPE_IN) {
-            // Walk the link to find the actual type of the connected output.
-            function readConnectedType(node, slot) {
+            function readConnectedSource(node, slot) {
                 const inp = node.inputs[slot];
                 if (!inp?.link) return null;
                 const link = node.graph?.links[inp.link];
                 if (!link) return null;
                 const src = node.graph?.nodes.find(n => n.id === link.origin_id);
                 if (src && src.outputs[link.origin_slot]) {
-                    return src.outputs[link.origin_slot].type;
+                    const out = src.outputs[link.origin_slot];
+                    const type = out.type === PIPE_TYPE ? PIPE_TYPE : out.type;
+                    const name = out.label || out.name || type;
+                    return { type, name };
                 }
-                return link.type || "*";
+                return { type: link.type || "*", name: link.type || "*" };
             }
 
-            // Ensure we always have (connected + 1) visible slots.
+            function addPipeSlot(node) {
+                if (!node.inputs.some(i => i.name === "pipe")) {
+                    node.addInput("pipe", PIPE_TYPE);
+                }
+            }
+
+            function ensurePipeOutput(node) {
+                if (!node.outputs.some(o => o.name === "pipe")) {
+                    node.addOutput("pipe", PIPE_TYPE);
+                }
+            }
+
             function rebalanceSlots(node) {
                 if (!node._graphLoaded) return;
-                const connected = node.inputs.reduce((n, inp) => n + (inp.link ? 1 : 0), 0);
+
+                addPipeSlot(node);
+                ensurePipeOutput(node);
+
+                let connected = 0;
+                for (let i = PIPE_SLOT + 1; i < node.inputs.length; i++) {
+                    if (node.inputs[i].link) connected++;
+                }
                 const desired = Math.min(MAX_SLOTS, Math.max(MIN_SLOTS, connected + 1));
 
-                while (node.inputs.length > desired) {
+                while (node.inputs.length - (PIPE_SLOT + 1) > desired) {
                     const idx = node.inputs.length - 1;
-                    delete node._pipeTypes?.[idx];
+                    const si = idx - (PIPE_SLOT + 1);
+                    delete node._pipeTypes?.[si];
+                    delete node._pipeNames?.[si];
                     node.removeInput(idx);
                 }
-                while (node.inputs.length < desired) {
-                    const idx = node.inputs.length;
-                    node.addInput(`input_${idx}`, "*");
+                while (node.inputs.length - (PIPE_SLOT + 1) < desired) {
+                    const si = node.inputs.length - (PIPE_SLOT + 1);
+                    node.addInput(`input_${si}`, "*");
                 }
-                for (let i = 0; i < node.inputs.length; i++) {
-                    paintSlot(node.inputs[i], node._pipeTypes?.[i]);
+                for (let i = PIPE_SLOT + 1; i < node.inputs.length; i++) {
+                    const si = i - (PIPE_SLOT + 1);
+                    paintSlot(node.inputs[i], node._pipeTypes?.[si], node._pipeNames?.[si]);
                 }
+
+                node.size = node.computeSize();
             }
 
-            // ── onNodeCreated ──
             const origCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const res = origCreated?.apply(this, arguments);
                 this._pipeTypes = {};
+                this._pipeNames = {};
                 this._graphLoaded = false;
+
+                while (this.inputs.length > PIPE_SLOT) {
+                    this.removeInput(this.inputs.length - 1);
+                }
+                while (this.outputs.length > PIPE_SLOT) {
+                    this.removeOutput(this.outputs.length - 1);
+                }
+                addPipeSlot(this);
+                ensurePipeOutput(this);
 
                 setTimeout(() => {
                     this._graphLoaded = true;
-                    for (let i = 0; i < this.inputs.length; i++) {
-                        const t = readConnectedType(this, i);
-                        if (t) this._pipeTypes[i] = t;
+                    for (let i = PIPE_SLOT + 1; i < this.inputs.length; i++) {
+                        const src = readConnectedSource(this, i);
+                        if (src && src.type !== PIPE_TYPE) {
+                            const si = i - (PIPE_SLOT + 1);
+                            this._pipeTypes[si] = src.type;
+                            this._pipeNames[si] = src.name;
+                        }
                     }
                     rebalanceSlots(this);
                 }, 0);
                 return res;
             };
 
-            // ── onConnectionsChange ──
             const origConn = nodeType.prototype.onConnectionsChange;
             nodeType.prototype.onConnectionsChange = function (inputType, slot, isConnected, link_info, outputSlot) {
                 const res = origConn?.apply(this, arguments);
 
                 if (inputType === 1 || inputType === true) {
                     if (!this._pipeTypes) this._pipeTypes = {};
+                    if (!this._pipeNames) this._pipeNames = {};
 
-                    if (isConnected && link_info) {
-                        const t = readConnectedType(this, slot);
-                        if (t) {
-                            this._pipeTypes[slot] = t;
-                            if (this._graphLoaded) paintLink(this.graph, link_info.id, t);
-                        }
-                    } else {
-                        delete this._pipeTypes?.[slot];
+                    if (slot === PIPE_SLOT) {
+                        if (!this._graphLoaded) return res;
+                        setTimeout(() => {
+                            if (isConnected) {
+                                const link = this.graph?.links[link_info?.id];
+                                if (link) {
+                                    const c = colorForType(PIPE_TYPE);
+                                    if (c) link.color = c;
+                                }
+                            }
+                            rebalanceSlots(this);
+                        }, 0);
+                        return res;
                     }
 
-                    paintSlot(this.inputs[slot], this._pipeTypes?.[slot]);
+                    const si = slot - (PIPE_SLOT + 1);
+
+                    if (isConnected && link_info) {
+                        const src = readConnectedSource(this, slot);
+                        if (src) {
+                            this._pipeTypes[si] = src.type;
+                            this._pipeNames[si] = src.name;
+                            if (this._graphLoaded) paintLink(this.graph, link_info.id, src.type);
+                        }
+                    } else {
+                        delete this._pipeTypes?.[si];
+                        delete this._pipeNames?.[si];
+                        const isLastSignal = slot === this.inputs.length - 1;
+                        if (!isLastSignal && this.inputs[slot] && !this.inputs[slot].link) {
+                            this.removeInput(slot);
+                            const compactedTypes = {};
+                            const compactedNames = {};
+                            for (const k in this._pipeTypes) {
+                                const nk = Number(k);
+                                if (nk < si) {
+                                    compactedTypes[nk] = this._pipeTypes[nk];
+                                } else {
+                                    compactedTypes[nk - 1] = this._pipeTypes[nk];
+                                }
+                            }
+                            for (const k in this._pipeNames) {
+                                const nk = Number(k);
+                                if (nk < si) {
+                                    compactedNames[nk] = this._pipeNames[nk];
+                                } else {
+                                    compactedNames[nk - 1] = this._pipeNames[nk];
+                                }
+                            }
+                            this._pipeTypes = compactedTypes;
+                            this._pipeNames = compactedNames;
+                        }
+                    }
+
+                    if (this.inputs[slot]) {
+                        paintSlot(this.inputs[slot], this._pipeTypes?.[si], this._pipeNames?.[si]);
+                    }
 
                     if (this._graphLoaded) rebalanceSlots(this);
                 }
@@ -153,35 +235,123 @@ app.registerExtension({
 
         // ──────── Pipe OUT ────────
         if (nodeData.name === PIPE_OUT) {
-            // Trace back through the pipe link to the Pipe IN node's _pipeTypes.
-            function sourceTypes(node) {
-                const inp = node.inputs[0];
-                if (!inp?.link) return null;
-                const link = node.graph?.links[inp.link];
-                if (!link) return null;
-                const src = node.graph?.nodes.find(n => n.id === link.origin_id);
-                return src?._pipeTypes ?? null;
+            function traceSourcePipe(node) {
+                let current = node;
+                for (let depth = 0; depth < 20; depth++) {
+                    const inp = current.inputs[PIPE_SLOT];
+                    if (!inp?.link) return null;
+                    const link = current.graph?.links[inp.link];
+                    if (!link) return null;
+                    const src = current.graph?.nodes.find(n => n.id === link.origin_id);
+                    if (!src) return null;
+                    if (src._pipeTypes) return src;
+                    // Traverse through any node whose output connected to our PIPE
+                    // input is itself a PIPE type — handles pass-through intermediaries.
+                    if (link.type === PIPE_TYPE) {
+                        current = src;
+                        continue;
+                    }
+                    return null;
+                }
+                return null;
+            }
+
+            function outputIdx(pipeSubSlot) { return PIPE_SLOT + 1 + pipeSubSlot; }
+
+            function setOutputLabel(out, typeName, sourceName) {
+                if (!out) return;
+                const isConcrete = typeName && typeName !== "*" && typeName !== "ANY" && typeName !== PIPE_TYPE;
+                out.type = isConcrete ? typeName : "*";
+                const label = isConcrete ? (sourceName || typeName) : "ANY";
+                if (out.label !== label) {
+                    out.label = label;
+                    out.name = label;
+                }
+            }
+
+            function ensurePipeOutput(node) {
+                if (node.outputs.length > 0 && node.outputs[PIPE_SLOT]) return;
+                while (node.outputs.length > 0) {
+                    node.removeOutput(0);
+                }
+                node.addOutput("pipe", PIPE_TYPE);
             }
 
             function syncOutputs(node) {
-                const types = sourceTypes(node);
-                for (let i = 0; i < node.outputs.length; i++) {
-                    paintSlot(node.outputs[i], types?.[i]);
+                const src = traceSourcePipe(node);
+                const types = src?._pipeTypes ?? null;
+                const names = src?._pipeNames ?? null;
+                const count = types ? Object.keys(types).length : 0;
+                const desired = Math.max(MIN_SLOTS, Math.min(MAX_SLOTS, count || MIN_SLOTS));
+
+                ensurePipeOutput(node);
+
+                const signalCount = node.outputs.length - (PIPE_SLOT + 1);
+                if (signalCount > desired) {
+                    for (let i = node.outputs.length - 1; i > PIPE_SLOT + desired; i--) {
+                        node.removeOutput(i);
+                    }
+                } else if (signalCount < desired) {
+                    for (let i = 0; i < desired - signalCount; i++) {
+                        node.addOutput("ANY", "*");
+                    }
                 }
+
+                const pipeOut = node.outputs[PIPE_SLOT];
+                if (pipeOut) {
+                    pipeOut.type = PIPE_TYPE;
+                    if (pipeOut.label !== "pipe") {
+                        pipeOut.label = "pipe";
+                        pipeOut.name = "pipe";
+                    }
+                }
+
+                for (let i = 0; i < desired; i++) {
+                    setOutputLabel(node.outputs[outputIdx(i)], types?.[i], names?.[i]);
+                }
+
+                node.size = node.computeSize();
             }
 
             const origCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const res = origCreated?.apply(this, arguments);
-                setTimeout(() => syncOutputs(this), 0);
+
+                if (!this.widgets) this.widgets = [];
+                if (!this.widgets.some(w => w.name === "\u21BB")) {
+                    this.addWidget("button", "\u21BB", null, () => {
+                        syncOutputs(this);
+                    });
+                }
+
+                syncOutputs(this);
                 return res;
+            };
+
+            const origMenu = nodeType.prototype.getExtraMenuOptions;
+            nodeType.prototype.getExtraMenuOptions = function (_, options) {
+                origMenu?.apply(this, arguments);
+                options.unshift({
+                    content: "\u21BB Refresh outputs",
+                    callback: () => {
+                        syncOutputs(this);
+                        this.graph?.setDirtyCanvas(true, true);
+                    },
+                });
             };
 
             const origConn = nodeType.prototype.onConnectionsChange;
             nodeType.prototype.onConnectionsChange = function (inputType, slot, isConnected, link_info, outputSlot) {
                 const res = origConn?.apply(this, arguments);
-                if ((inputType === 1 || inputType === true) && slot === 0) {
-                    setTimeout(() => syncOutputs(this), 0);
+                if ((inputType === 1 || inputType === true) && slot === PIPE_SLOT) {
+                    if (isConnected && link_info) {
+                        const c = colorForType(PIPE_TYPE);
+                        if (c) {
+                            const link = this.graph?.links[link_info.id];
+                            if (link) link.color = c;
+                        }
+                    }
+                    syncOutputs(this);
                 }
                 return res;
             };

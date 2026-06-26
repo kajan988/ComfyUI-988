@@ -235,11 +235,10 @@ app.registerExtension({
 
         // ──────── Pipe OUT ────────
         if (nodeData.name === PIPE_OUT) {
-            // Pipe passthrough sits at the LAST slot (index MAX_SLOTS) so signal
-            // output indices 0..MAX_SLOTS-1 never shift — backward compatible.
-            // All MAX_SLOTS signals are always shown (no autogrow) to keep indices
-            // stable across saves/loads.
-            const PIPE_OUT_SLOT = MAX_SLOTS;
+            // Layout: output 0 = pipe passthrough, outputs 1..MAX_SLOTS = signals.
+            // All outputs are always visible (no autogrow) for stable indices.
+            const PIPE_OUT_SLOT = 0;
+            const SIGNAL_START = 1;
 
             function traceSourcePipe(node) {
                 let current = node;
@@ -276,26 +275,24 @@ app.registerExtension({
                 const types = src?._pipeTypes ?? null;
                 const names = src?._pipeNames ?? null;
 
-                // Ensure all signal slots 0..MAX_SLOTS-1 exist
-                while (node.outputs.length < PIPE_OUT_SLOT) {
-                    node.addOutput("ANY", "*");
-                }
-                // Ensure pipe passthrough at the last slot
-                while (node.outputs.length <= PIPE_OUT_SLOT) {
+                // Ensure all 1 + MAX_SLOTS outputs exist
+                const totalDesired = 1 + MAX_SLOTS;
+                while (node.outputs.length < totalDesired) {
                     node.addOutput("ANY", "*");
                 }
 
-                // Paint signal outputs 0..MAX_SLOTS-1
-                for (let i = 0; i < MAX_SLOTS; i++) {
-                    setOutputLabel(node.outputs[i], types?.[i], names?.[i]);
-                }
-
-                // Paint pipe passthrough at the last slot
+                // Output 0: pipe passthrough
                 const pipeOut = node.outputs[PIPE_OUT_SLOT];
                 pipeOut.type = PIPE_TYPE;
                 if (pipeOut.label !== "pipe") {
                     pipeOut.label = "pipe";
                     pipeOut.name = "pipe";
+                }
+
+                // Outputs 1..MAX_SLOTS: signals
+                for (let i = 0; i < MAX_SLOTS; i++) {
+                    const slot = node.outputs[SIGNAL_START + i];
+                    setOutputLabel(slot, types?.[i], names?.[i]);
                 }
 
                 node.size = node.computeSize();

@@ -73,14 +73,19 @@ app.registerExtension({
             function applySlotLabel(node, slot) {
                 const inp = node.inputs?.[slot];
                 if (!inp || inp.name === "pipe") return;
+                const si = slot - 1; // signal index (slot 0 is pipe)
                 if (!inp.link) {
                     inp.type = "*";
                     if (inp.label !== "ANY") { inp.label = "ANY"; inp.name = "ANY"; }
+                    if (node._pipeTypes) delete node._pipeTypes[si];
+                    if (node._pipeNames) delete node._pipeNames[si];
                     return;
                 }
                 const src = readConnectedSource(node, slot);
                 const typeName = src?.type;
                 const sourceName = src?.name;
+                if (node._pipeTypes) node._pipeTypes[si] = typeName || "*";
+                if (node._pipeNames) node._pipeNames[si] = sourceName || typeName || "*";
                 const isConcrete = typeName && typeName !== "*" && typeName !== "ANY";
                 inp.type = isConcrete ? typeName : "*";
                 const label = isConcrete ? (sourceName || typeName) : "ANY";
@@ -101,6 +106,8 @@ app.registerExtension({
             const origCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const res = origCreated?.apply(this, arguments);
+                this._pipeTypes = {};
+                this._pipeNames = {};
                 // Defer so graph links are restored before we trace them
                 setTimeout(() => applyAllLabels(this), 0);
                 return res;

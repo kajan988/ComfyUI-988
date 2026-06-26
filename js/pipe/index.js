@@ -7,7 +7,6 @@ const PIPE_TYPE = "PIPE988";
 
 // ── Slot limits ──
 const MAX_SLOTS = 10;
-const MIN_SLOTS = 1;
 const PIPE_SLOT = 0;
 
 // ── Colour map (fallback when LGraphCanvas.link_type_colors lacks an entry) ──
@@ -41,29 +40,8 @@ function colorForType(type) {
     return FALLBACK_COLORS[type] || null;
 }
 
-function paintSlot(slot, typeName, sourceName) {
-    if (!slot) return;
-    const isPipe = slot.type === PIPE_TYPE;
-    if (isPipe) return;
-    const isConcrete = typeName && typeName !== "*" && typeName !== "ANY";
-    slot.type = isConcrete ? typeName : "*";
-    const label = isConcrete ? (sourceName || typeName) : "ANY";
-    if (slot.label !== label) {
-        slot.label = label;
-        slot.name = label;
-    }
-}
-
-function paintLink(graph, linkId, typeName) {
-    if (!graph || linkId == null) return;
-    const link = graph.links[linkId];
-    if (!link) return;
-    const c = colorForType(typeName);
-    if (c) link.color = c;
-}
-
 // ──────────────────────────────────
-//  Pipe IN 988  — autogrow inputs + colour + single pipe output
+//  Pipe IN/OUT 988
 // ──────────────────────────────────
 app.registerExtension({
     name: "988.Pipe",
@@ -71,7 +49,10 @@ app.registerExtension({
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== PIPE_IN && nodeData.name !== PIPE_OUT) return;
 
-        // ──────── Pipe IN ────────
+        // ──────── Pipe IN — stable sockets, dynamic labels ────────
+        // All 11 inputs (pipe + 10 signals) are declared in INPUT_TYPES and
+        // always exist.  No add/remove of sockets — only type/label/colour
+        // is updated dynamically when connections change.
         if (nodeData.name === PIPE_IN) {
             function readConnectedSource(node, slot) {
                 const inp = node.inputs[slot];
@@ -81,153 +62,55 @@ app.registerExtension({
                 const src = node.graph?.nodes.find(n => n.id === link.origin_id);
                 if (src && src.outputs[link.origin_slot]) {
                     const out = src.outputs[link.origin_slot];
-                    const type = out.type === PIPE_TYPE ? PIPE_TYPE : out.type;
-                    const name = out.label || out.name || type;
-                    return { type, name };
+                    return {
+                        type: out.type === PIPE_TYPE ? PIPE_TYPE : out.type,
+                        name: out.label || out.name || out.type,
+                    };
                 }
                 return { type: link.type || "*", name: link.type || "*" };
             }
 
-            function addPipeSlot(node) {
-                if (!node.inputs.some(i => i.name === "pipe")) {
-                    node.addInput("pipe", PIPE_TYPE);
+            function applySlotLabel(node, slot) {
+                const inp = node.inputs?.[slot];
+                if (!inp || inp.name === "pipe") return;
+                if (!inp.link) {
+                    inp.type = "*";
+                    if (inp.label !== "ANY") { inp.label = "ANY"; inp.name = "ANY"; }
+                    return;
+                }
+                const src = readConnectedSource(node, slot);
+                const typeName = src?.type;
+                const sourceName = src?.name;
+                const isConcrete = typeName && typeName !== "*" && typeName !== "ANY";
+                inp.type = isConcrete ? typeName : "*";
+                const label = isConcrete ? (sourceName || typeName) : "ANY";
+                if (inp.label !== label) { inp.label = label; inp.name = label; }
+                if (isConcrete) {
+                    const link = node.graph?.links[inp.link];
+                    const c = colorForType(typeName);
+                    if (c && link) link.color = c;
                 }
             }
 
-            function ensurePipeOutput(node) {
-                if (!node.outputs.some(o => o.name === "pipe")) {
-                    node.addOutput("pipe", PIPE_TYPE);
+            function applyAllLabels(node) {
+                for (let i = 0; i < node.inputs.length; i++) {
+                    if (node.inputs[i]?.name !== "pipe") applySlotLabel(node, i);
                 }
-            }
-
-            function rebalanceSlots(node) {
-                if (!node._graphLoaded) return;
-
-                addPipeSlot(node);
-                ensurePipeOutput(node);
-
-                let connected = 0;
-                for (let i = PIPE_SLOT + 1; i < node.inputs.length; i++) {
-                    if (node.inputs[i].link) connected++;
-                }
-                const desired = Math.min(MAX_SLOTS, Math.max(MIN_SLOTS, connected + 1));
-
-                while (node.inputs.length - (PIPE_SLOT + 1) > desired) {
-                    const idx = node.inputs.length - 1;
-                    const si = idx - (PIPE_SLOT + 1);
-                    delete node._pipeTypes?.[si];
-                    delete node._pipeNames?.[si];
-                    node.removeInput(idx);
-                }
-                while (node.inputs.length - (PIPE_SLOT + 1) < desired) {
-                    const si = node.inputs.length - (PIPE_SLOT + 1);
-                    node.addInput(`input_${si}`, "*");
-                }
-                for (let i = PIPE_SLOT + 1; i < node.inputs.length; i++) {
-                    const si = i - (PIPE_SLOT + 1);
-                    paintSlot(node.inputs[i], node._pipeTypes?.[si], node._pipeNames?.[si]);
-                }
-
-                node.size = node.computeSize();
             }
 
             const origCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const res = origCreated?.apply(this, arguments);
-                this._pipeTypes = {};
-                this._pipeNames = {};
-                this._graphLoaded = false;
-
-                while (this.inputs.length > PIPE_SLOT) {
-                    this.removeInput(this.inputs.length - 1);
-                }
-                while (this.outputs.length > PIPE_SLOT) {
-                    this.removeOutput(this.outputs.length - 1);
-                }
-                addPipeSlot(this);
-                ensurePipeOutput(this);
-
-                setTimeout(() => {
-                    this._graphLoaded = true;
-                    for (let i = PIPE_SLOT + 1; i < this.inputs.length; i++) {
-                        const src = readConnectedSource(this, i);
-                        if (src && src.type !== PIPE_TYPE) {
-                            const si = i - (PIPE_SLOT + 1);
-                            this._pipeTypes[si] = src.type;
-                            this._pipeNames[si] = src.name;
-                        }
-                    }
-                    rebalanceSlots(this);
-                }, 0);
+                // Defer so graph links are restored before we trace them
+                setTimeout(() => applyAllLabels(this), 0);
                 return res;
             };
 
             const origConn = nodeType.prototype.onConnectionsChange;
             nodeType.prototype.onConnectionsChange = function (inputType, slot, isConnected, link_info, outputSlot) {
                 const res = origConn?.apply(this, arguments);
-
-                if (inputType === 1 || inputType === true) {
-                    if (!this._pipeTypes) this._pipeTypes = {};
-                    if (!this._pipeNames) this._pipeNames = {};
-
-                    if (slot === PIPE_SLOT) {
-                        if (!this._graphLoaded) return res;
-                        setTimeout(() => {
-                            if (isConnected) {
-                                const link = this.graph?.links[link_info?.id];
-                                if (link) {
-                                    const c = colorForType(PIPE_TYPE);
-                                    if (c) link.color = c;
-                                }
-                            }
-                            rebalanceSlots(this);
-                        }, 0);
-                        return res;
-                    }
-
-                    const si = slot - (PIPE_SLOT + 1);
-
-                    if (isConnected && link_info) {
-                        const src = readConnectedSource(this, slot);
-                        if (src) {
-                            this._pipeTypes[si] = src.type;
-                            this._pipeNames[si] = src.name;
-                            if (this._graphLoaded) paintLink(this.graph, link_info.id, src.type);
-                        }
-                    } else {
-                        delete this._pipeTypes?.[si];
-                        delete this._pipeNames?.[si];
-                        const isLastSignal = slot === this.inputs.length - 1;
-                        if (!isLastSignal && this.inputs[slot] && !this.inputs[slot].link) {
-                            this.removeInput(slot);
-                            const compactedTypes = {};
-                            const compactedNames = {};
-                            for (const k in this._pipeTypes) {
-                                const nk = Number(k);
-                                if (nk < si) {
-                                    compactedTypes[nk] = this._pipeTypes[nk];
-                                } else {
-                                    compactedTypes[nk - 1] = this._pipeTypes[nk];
-                                }
-                            }
-                            for (const k in this._pipeNames) {
-                                const nk = Number(k);
-                                if (nk < si) {
-                                    compactedNames[nk] = this._pipeNames[nk];
-                                } else {
-                                    compactedNames[nk - 1] = this._pipeNames[nk];
-                                }
-                            }
-                            this._pipeTypes = compactedTypes;
-                            this._pipeNames = compactedNames;
-                        }
-                    }
-
-                    if (this.inputs[slot]) {
-                        paintSlot(this.inputs[slot], this._pipeTypes?.[si], this._pipeNames?.[si]);
-                    }
-
-                    if (this._graphLoaded) rebalanceSlots(this);
+                if ((inputType === 1 || inputType === true)) {
+                    applySlotLabel(this, slot);
                 }
                 return res;
             };

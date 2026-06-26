@@ -29,7 +29,7 @@ This project contains code adapted from:
 | **Simple Config 988** | 🦇988/Utility | Select a sampler and scheduler to pass their string values as individual outputs. |
 | **Display UI 988** | 🦇988/Utility | Display any input value as a read-only text box on the node. Accepts strings, numbers, or any wire type. |
 | **Pipe IN 988** | 🦇988/Utility | Bundle up to 10 signals of any type into a single PIPE. Autogrow inputs — shows `connected + 1` slots (min 1), expands up to 10 as you connect. Auto-detects type from the connected source and repaints the socket label + colour accordingly. Pipe pass-through — an incoming PIPE provides defaults for all slots; individual inputs override. |
-| **Pipe OUT 988** | 🦇988/Utility | Unpack a PIPE back into individual signals. Autogrow outputs — mirrors Pipe IN's `connected + 1` pattern. Sockets are auto-labelled with the original signal name and coloured by type via traceback through the Pipe IN node. Tunnels through any intermediate pass-through nodes (not just Pipe IN/OUT). Includes a ↻ refresh button and context menu item for manual re-sync. First output is a PIPE passthrough for chaining. |
+| **Pipe OUT 988** | 🦇988/Utility | Unpack a PIPE back into individual signals. All 10 signal sockets are always shown (indices 0–9 stable across saves). Sockets are auto-labelled with the original signal name and coloured by type via traceback through the Pipe IN node. Tunnels through any intermediate pass-through nodes (not just Pipe IN/OUT). Last socket is a PIPE passthrough for chaining. Includes a ↻ refresh button and context menu item for manual re-sync. |
 
 ## Installation
 

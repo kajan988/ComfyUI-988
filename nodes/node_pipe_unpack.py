@@ -1,7 +1,7 @@
 """Pipe OUT 988 — split a PIPE back into individual signals.
 
-First input and first output are always a PIPE pass-through (LP-style).
-Connecting a pipe to the input passes it through unchanged to the first output.
+Second output onward is a PIPE pass-through for chaining (LP-style).
+Outputs 0–9 preserve index order for backward compatibility.
 """
 
 from ._type_helpers import ANY
@@ -11,8 +11,9 @@ from ._pipe_utils import PIPE, NUM_SLOTS
 class PipeOUT988:
     DESCRIPTION = (
         "Unpacks a PIPE from Pipe IN 988 back into individual signals. "
-        "First output is the pipe pass-through — connect it to the next "
-        "Pipe IN to chain pipes. Remaining outputs carry the individual signals."
+        "Outputs 0–9 carry the individual signals. "
+        "Last output is the pipe pass-through — connect it to the next "
+        "Pipe IN to chain pipes."
     )
 
     @classmethod
@@ -23,20 +24,20 @@ class PipeOUT988:
             }
         }
 
-    RETURN_TYPES = (PIPE,) + tuple(ANY for _ in range(NUM_SLOTS))
-    RETURN_NAMES = ("pipe",) + tuple("ANY" for _ in range(NUM_SLOTS))
-    OUTPUT_TOOLTIPS = ("Pipe pass-through.",) + tuple(
+    RETURN_TYPES = tuple(ANY for _ in range(NUM_SLOTS)) + (PIPE,)
+    RETURN_NAMES = tuple("ANY" for _ in range(NUM_SLOTS)) + ("pipe",)
+    OUTPUT_TOOLTIPS = tuple(
         f"Signal {i} — type detected from Pipe IN input" for i in range(NUM_SLOTS)
-    )
+    ) + ("Pipe pass-through.",)
     FUNCTION = "unpack"
     CATEGORY = "\U0001f987988/Utility"
 
     def unpack(self, pipe):
         if pipe is None:
-            return (None,) + tuple(None for _ in range(NUM_SLOTS))
+            return tuple(None for _ in range(NUM_SLOTS)) + (None,)
         values = pipe.get("values", [])
         padded = values + [None] * (NUM_SLOTS - len(values))
-        return (pipe,) + tuple(padded[:NUM_SLOTS])
+        return tuple(padded[:NUM_SLOTS]) + (pipe,)
 
 
 NODE_CLASS_MAPPINGS = {"PipeOUT988": PipeOUT988}

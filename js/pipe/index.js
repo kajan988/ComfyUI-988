@@ -235,6 +235,12 @@ app.registerExtension({
 
         // ──────── Pipe OUT ────────
         if (nodeData.name === PIPE_OUT) {
+            // Pipe passthrough sits at the LAST slot (index MAX_SLOTS) so signal
+            // output indices 0..MAX_SLOTS-1 never shift — backward compatible.
+            // All MAX_SLOTS signals are always shown (no autogrow) to keep indices
+            // stable across saves/loads.
+            const PIPE_OUT_SLOT = MAX_SLOTS;
+
             function traceSourcePipe(node) {
                 let current = node;
                 for (let depth = 0; depth < 20; depth++) {
@@ -245,8 +251,6 @@ app.registerExtension({
                     const src = current.graph?.nodes.find(n => n.id === link.origin_id);
                     if (!src) return null;
                     if (src._pipeTypes) return src;
-                    // Traverse through any node whose output connected to our PIPE
-                    // input is itself a PIPE type — handles pass-through intermediaries.
                     if (link.type === PIPE_TYPE) {
                         current = src;
                         continue;
@@ -255,8 +259,6 @@ app.registerExtension({
                 }
                 return null;
             }
-
-            function outputIdx(pipeSubSlot) { return PIPE_SLOT + 1 + pipeSubSlot; }
 
             function setOutputLabel(out, typeName, sourceName) {
                 if (!out) return;
@@ -269,45 +271,31 @@ app.registerExtension({
                 }
             }
 
-            function ensurePipeOutput(node) {
-                if (node.outputs.length > 0 && node.outputs[PIPE_SLOT]) return;
-                while (node.outputs.length > 0) {
-                    node.removeOutput(0);
-                }
-                node.addOutput("pipe", PIPE_TYPE);
-            }
-
             function syncOutputs(node) {
                 const src = traceSourcePipe(node);
                 const types = src?._pipeTypes ?? null;
                 const names = src?._pipeNames ?? null;
-                const count = types ? Object.keys(types).length : 0;
-                const desired = Math.max(MIN_SLOTS, Math.min(MAX_SLOTS, count || MIN_SLOTS));
 
-                ensurePipeOutput(node);
-
-                const signalCount = node.outputs.length - (PIPE_SLOT + 1);
-                if (signalCount > desired) {
-                    for (let i = node.outputs.length - 1; i > PIPE_SLOT + desired; i--) {
-                        node.removeOutput(i);
-                    }
-                } else if (signalCount < desired) {
-                    for (let i = 0; i < desired - signalCount; i++) {
-                        node.addOutput("ANY", "*");
-                    }
+                // Ensure all signal slots 0..MAX_SLOTS-1 exist
+                while (node.outputs.length < PIPE_OUT_SLOT) {
+                    node.addOutput("ANY", "*");
+                }
+                // Ensure pipe passthrough at the last slot
+                while (node.outputs.length <= PIPE_OUT_SLOT) {
+                    node.addOutput("ANY", "*");
                 }
 
-                const pipeOut = node.outputs[PIPE_SLOT];
-                if (pipeOut) {
-                    pipeOut.type = PIPE_TYPE;
-                    if (pipeOut.label !== "pipe") {
-                        pipeOut.label = "pipe";
-                        pipeOut.name = "pipe";
-                    }
+                // Paint signal outputs 0..MAX_SLOTS-1
+                for (let i = 0; i < MAX_SLOTS; i++) {
+                    setOutputLabel(node.outputs[i], types?.[i], names?.[i]);
                 }
 
-                for (let i = 0; i < desired; i++) {
-                    setOutputLabel(node.outputs[outputIdx(i)], types?.[i], names?.[i]);
+                // Paint pipe passthrough at the last slot
+                const pipeOut = node.outputs[PIPE_OUT_SLOT];
+                pipeOut.type = PIPE_TYPE;
+                if (pipeOut.label !== "pipe") {
+                    pipeOut.label = "pipe";
+                    pipeOut.name = "pipe";
                 }
 
                 node.size = node.computeSize();

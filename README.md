@@ -12,6 +12,7 @@ This project contains code adapted from:
 |-------------------|-------|----------|-------------------|
 | [EA_LMStudio](https://github.com/EnragedAntelope/EA_LMStudio) | EnragedAntelope | MIT | `node_lm_studio.py`, `node_llm_unload.py`, `_model_fetcher.py`, `_config_manager.py` |
 | [ComfyUI_Steudio](https://github.com/Steudio/ComfyUI_Steudio) | Steudio | GPL v3 | `node_dac_algorithm.py`, `node_divide_image_select.py`, `node_combine_tiles.py`, `node_dac_data_scale.py`, `node_display_ui.py`, `js/steudio/` |
+| [ComfyUI-Photopea](https://github.com/coolzilj/ComfyUI-Photopea) | coolzilj | MIT | `js/photopea/` |
 
 | Node | Subcategory | Description |
 |------|-------------|-------------|

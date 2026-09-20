@@ -36,6 +36,39 @@ from ._model_fetcher import (
 
 logger = logging.getLogger("988")
 
+# --- Dependency log noise suppression ---
+# The lmstudio SDK and its HTTP/websocket transport emit a lot of INFO-level
+# chatter on every request. We quiet it down to WARNING without touching
+# ComfyUI's own logging or other custom nodes.
+_NOISY_NAMED_LOGGERS = ("httpx", "httpcore", "websockets", "websocket", "urllib3")
+
+
+class _SuppressDependencyInfo(logging.Filter):
+    """Drop sub-WARNING log records originating from the lmstudio SDK package."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.WARNING:
+            return True
+        path = (record.pathname or "").replace(os.sep, "/").replace("\\", "/").lower()
+        return "/lmstudio/" not in path
+
+
+def _quiet_dependency_logs() -> None:
+    """Suppress noisy INFO logs from the lmstudio SDK and its HTTP/ws deps.
+
+    Idempotent: safe to call more than once.
+    """
+    for name in _NOISY_NAMED_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if not any(isinstance(f, _SuppressDependencyInfo) for f in handler.filters):
+            handler.addFilter(_SuppressDependencyInfo())
+
+
+_quiet_dependency_logs()
+
 _config_manager = ConfigManager()
 _config_manager.create_user_config_template()
 _config_manager.ensure_default_config_exists()
@@ -67,15 +100,85 @@ REASONING_MODE_OPTIONS = [
     "Custom tags",
 ]
 
-COMMON_REASONING_PATTERNS = [
-    (r"<think>(.*?)</think>", "<think>", "</think>"),
-    (r"<thinking>(.*?)</thinking>", "<thinking>", "</thinking>"),
-    (r"<reasoning>(.*?)</reasoning>", "<reasoning>", "</reasoning>"),
-    (r"<reason>(.*?)</reason>", "<reason>", "</reason>"),
+# enable_thinking toggle options. "Model default" leaves the model's own
+# behavior untouched (nothing is sent); the other two force thinking on/off
+# for hybrid reasoning models (e.g. Qwen3) via the SDK's enableThinking flag.
+ENABLE_THINKING_OPTIONS = [
+    "Model default",
+    "Enabled",
+    "Disabled",
 ]
 
-GPT_OSS_ANALYSIS_PATTERN = r"<\|channel\|>analysis<\|message\|>(.*?)<\|end\|>"
-GPT_OSS_FINAL_PATTERN = r"<\|channel\|>final<\|message\|>(.*?)$"
+# Common reasoning tag patterns used by different models
+# Order matters - most common first for efficiency
+# Precompiled once at import; these run on every generation.
+COMMON_REASONING_PATTERNS = [
+    # DeepSeek R1, Qwen3, QwQ, GLM-4/Z1 - most common
+    (re.compile(r"<think>(.*?)</think>", re.DOTALL), "<think>", "</think>"),
+    # Alternative spelling
+    (re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL), "<thinking>", "</thinking>"),
+    # Some models use this
+    (re.compile(r"<reasoning>(.*?)</reasoning>", re.DOTALL), "<reasoning>", "</reasoning>"),
+    # Occasionally seen
+    (re.compile(r"<reason>(.*?)</reason>", re.DOTALL), "<reason>", "</reason>"),
+]
+
+# GPT-OSS models use OpenAI's "harmony" channel format:
+#   <|start|>assistant<|channel|>analysis<|message|>...<|end|>
+#   <|start|>assistant<|channel|>final<|message|>...<|return|>
+# LM Studio usually parses this itself, but partial leaks are common: a final
+# block with its markers still attached, an analysis block missing its <|end|>
+# terminator, a trailing <|return|>, or (when special tokens get stripped
+# during detokenization) a bare "analysis...assistantfinal..." string.
+#
+# Analysis/commentary segments end at <|end|> or at the start of the next
+# message/channel header, or at end of text if truncated. The commentary
+# channel carries preambles/tool chatter, so it is routed to reasoning too.
+GPT_OSS_ANALYSIS_RE = re.compile(
+    r"<\|channel\|>(?:analysis|commentary)<\|message\|>(.*?)"
+    r"(?=<\|end\|>|<\|start\|>|<\|channel\|>|\Z)",
+    re.DOTALL,
+)
+GPT_OSS_FINAL_RE = re.compile(r"<\|channel\|>final<\|message\|>(.*)\Z", re.DOTALL)
+# Sweep for any harmony markers left over after extraction. <|...|> tokens
+# never appear in legitimate prose, so removing them is safe.
+HARMONY_MARKER_RE = re.compile(
+    r"<\|start\|>(?:assistant|user|system|tool)?"
+    r"|<\|channel\|>(?:analysis|commentary|final)?"
+    r"|<\|message\|>|<\|end\|>|<\|return\|>|<\|constrain\|>"
+)
+# Detokenized-without-special-tokens variant: "analysisUser wants...assistantfinalAnswer".
+# "assistantfinal" is the discriminator; it never occurs in normal prose.
+GPT_OSS_STRIPPED_RE = re.compile(r"\s*analysis(.*?)assistantfinal(.*)\Z", re.DOTALL)
+
+# Quick membership test for whether harmony markers are present at all
+_HARMONY_TOKENS = ("<|channel|>", "<|message|>", "<|start|>", "<|end|>", "<|return|>")
+
+# Plain-text headings that some models (often community finetunes/merges) emit when
+# they "think" without wrapping it in tags. We only use these to DETECT likely leaked
+# thinking for a better troubleshooting hint -- we never strip them from the response.
+LEAKED_THINKING_MARKERS = (
+    "thinking process",
+    "thought process",
+    "reasoning process",
+    "let me think",
+    "let's think",
+    "step 1:",
+    "step 1.",
+)
+
+
+def _looks_like_leaked_thinking(text: str) -> bool:
+    """Heuristically detect tagless reasoning that leaked into the response.
+
+    Checks only the start of the response (first ~200 chars) so that a marker
+    appearing mid-answer in a legitimate reply doesn't trigger a false positive.
+    Detection only -- callers must not strip anything based on this.
+    """
+    if not text:
+        return False
+    head = text[:200].lower()
+    return any(marker in head for marker in LEAKED_THINKING_MARKERS)
 
 TEMPLATES_FILE = Path(__file__).parent.parent / "config" / "system_message_templates.json"
 
@@ -233,6 +336,18 @@ class LMStudio988:
                     "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05,
                     "tooltip": "Penalizes repeated tokens. 1.0 = disabled.",
                 }),
+                "min_p": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01,
+                    "tooltip": "Min-P sampling: drop tokens below this fraction of the top token's probability (0.0 = disabled).",
+                }),
+                "presence_penalty": ("FLOAT", {
+                    "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05,
+                    "tooltip": "Flat penalty on any token already used, encouraging new topics (0.0 = disabled).",
+                }),
+                "enable_thinking": (ENABLE_THINKING_OPTIONS, {
+                    "default": "Model default",
+                    "tooltip": "Force thinking/reasoning on hybrid models like Qwen3 without the '/think' prompt hack. 'Model default' leaves behavior untouched; 'Enabled'/'Disabled' force via the SDK enableThinking flag.",
+                }),
                 "reasoning_mode": (REASONING_MODE_OPTIONS, {
                     "default": "Auto-detect (recommended)",
                     "tooltip": "How to extract reasoning/thinking from model output.",
@@ -336,7 +451,7 @@ class LMStudio988:
                 img_array = image_tensor[0].cpu().numpy()
             else:
                 img_array = image_tensor.cpu().numpy()
-            img_array = (img_array * 255).astype(np.uint8)
+            img_array = np.clip(img_array * 255.0, 0, 255).astype(np.uint8)
             pil_image = Image.fromarray(img_array)
             max_dim = RESIZE_DIMENSIONS.get(resize_option)
             if max_dim is not None:
@@ -346,28 +461,71 @@ class LMStudio988:
             logger.error(f"Failed to convert image: {e}")
             return None
 
-    def _extract_reasoning_auto(self, text: str) -> Tuple[str, str, Optional[str]]:
-        analysis_match = re.search(GPT_OSS_ANALYSIS_PATTERN, text, re.DOTALL)
-        if analysis_match:
-            reasoning = analysis_match.group(1).strip()
-            final_match = re.search(GPT_OSS_FINAL_PATTERN, text, re.DOTALL)
-            if final_match:
-                response = final_match.group(1).strip()
-            else:
-                response = re.sub(GPT_OSS_ANALYSIS_PATTERN, "", text, flags=re.DOTALL)
-                response = re.sub(r"<\|start\|>assistant", "", response)
-                response = re.sub(r"<\|channel\|>final<\|message\|>", "", response)
-                response = re.sub(r"<\|end\|>", "", response)
-                response = response.strip()
-            return response, reasoning, "<|channel|>analysis"
+    def _extract_reasoning_gpt_oss(self, text: str) -> Optional[Tuple[str, str, str]]:
+        """Extract reasoning from GPT-OSS "harmony" channel output, including
+        partial leaks where only some markers survived LM Studio's own parsing.
 
+        Returns (response, reasoning, detected_pattern), or None if the
+        text contains no harmony markers at all.
+        """
+        if any(token in text for token in _HARMONY_TOKENS):
+            reasoning_parts = [m.group(1).strip() for m in GPT_OSS_ANALYSIS_RE.finditer(text)]
+            reasoning_parts = [p for p in reasoning_parts if p]
+            final_match = GPT_OSS_FINAL_RE.search(text)
+
+            if final_match:
+                response = final_match.group(1)
+            else:
+                response = GPT_OSS_ANALYSIS_RE.sub("", text)
+
+            # Only stray terminators present (e.g. a bare <|end|> with no
+            # channel headers): treat text before the terminator as leaked
+            # reasoning, mirroring the missing-open-tag fallback below.
+            if not reasoning_parts and not final_match and "<|channel|>" not in text:
+                before, sep, after = text.partition("<|end|>")
+                if sep and before.strip() and after.strip():
+                    return (
+                        HARMONY_MARKER_RE.sub("", after).strip(),
+                        before.strip(),
+                        "<|end|> (stray terminator)",
+                    )
+
+            # Sweep any remaining markers (<|return|>, <|start|>assistant, ...)
+            response = HARMONY_MARKER_RE.sub("", response).strip()
+            return response, "\n---\n".join(reasoning_parts), "<|channel|> (GPT-OSS harmony)"
+
+        # Detokenized variant with special tokens stripped:
+        # "analysisUser wants a cat pic.assistantfinalHere is a cat."
+        stripped_match = GPT_OSS_STRIPPED_RE.match(text)
+        if stripped_match:
+            return (
+                stripped_match.group(2).strip(),
+                stripped_match.group(1).strip(),
+                "analysis...assistantfinal (stripped special tokens)",
+            )
+
+        return None
+
+    def _extract_reasoning_auto(self, text: str) -> Tuple[str, str, Optional[str]]:
+        """Auto-detect and extract reasoning using common patterns.
+
+        Returns (response_without_reasoning, reasoning_content, detected_pattern);
+        detected_pattern is None if no pattern matched.
+        """
+        # Check for GPT-OSS harmony/channel-based format first
+        gpt_oss_result = self._extract_reasoning_gpt_oss(text)
+        if gpt_oss_result is not None:
+            return gpt_oss_result
+
+        # Check standard tag-based patterns
         for pattern, open_tag, close_tag in COMMON_REASONING_PATTERNS:
-            matches = list(re.finditer(pattern, text, re.DOTALL))
+            matches = list(pattern.finditer(text))
             if matches:
                 reasoning_parts = [m.group(1) for m in matches]
-                clean_text = re.sub(pattern, "", text, flags=re.DOTALL)
+                clean_text = pattern.sub("", text)
                 return clean_text.strip(), "\n---\n".join(reasoning_parts).strip(), open_tag
 
+        # Fallback: Check for closing tag without opening tag (model bug/edge case)
         for _, open_tag, close_tag in COMMON_REASONING_PATTERNS:
             if close_tag in text and open_tag not in text:
                 parts = text.split(close_tag, 1)
@@ -376,7 +534,12 @@ class LMStudio988:
                     response = parts[1].strip()
                     if reasoning and response:
                         return response, reasoning, f"{close_tag} (missing open tag)"
+                    if reasoning and not response:
+                        # Model spent its whole budget thinking and never
+                        # produced an answer (usually maxTokens truncation).
+                        return "", reasoning, f"{close_tag} (missing open tag, response truncated)"
 
+        # No pattern matched
         return text, "", None
 
     def _extract_reasoning_custom(self, text: str, open_tag: str, close_tag: str) -> Tuple[str, str]:
@@ -411,6 +574,8 @@ class LMStudio988:
         draft_model_selection: str = CUSTOM_MODEL_OPTION,
         custom_draft_model: str = "",
         top_p: float = 1.0, top_k: int = 0, repeat_penalty: float = 1.0,
+        min_p: float = 0.0, presence_penalty: float = 0.0,
+        enable_thinking: str = "Model default",
         reasoning_mode: str = "Auto-detect (recommended)",
         custom_open_tag: str = "<think>", custom_close_tag: str = "</think>",
         unload_all_models: bool = False, empty_cuda_cache: bool = False,
@@ -459,6 +624,10 @@ class LMStudio988:
         pil_images: List[Image.Image] = []
         for idx, img_tensor in enumerate(image_inputs, start=1):
             if img_tensor is not None:
+                if len(img_tensor.shape) == 4 and img_tensor.shape[0] > 1:
+                    troubleshooting_lines.append(
+                        f"[WARNING] Image {idx}: batch of {img_tensor.shape[0]} received; only the first image is used"
+                    )
                 pil_img = self._convert_image_to_pil(img_tensor, image_resize)
                 if pil_img:
                     pil_images.append(pil_img)
@@ -522,6 +691,12 @@ class LMStudio988:
                     gen_config["topKSampling"] = top_k
                 if repeat_penalty != 1.0:
                     gen_config["repeatPenalty"] = repeat_penalty
+                if min_p > 0.0:
+                    gen_config["minPSampling"] = min_p
+                if presence_penalty != 0.0:
+                    gen_config["presencePenalty"] = presence_penalty
+                if enable_thinking != "Model default":
+                    gen_config["enableThinking"] = (enable_thinking == "Enabled")
                 if draft_model:
                     gen_config["draftModel"] = draft_model
 
@@ -557,8 +732,14 @@ class LMStudio988:
                     final_response, reasoning, detected_pattern = self._extract_reasoning_auto(response_text)
                     if detected_pattern:
                         troubleshooting_lines.append(f"[INFO] Auto-detected reasoning format: {detected_pattern}")
+                    elif _looks_like_leaked_thinking(response_text):
+                        troubleshooting_lines.append("[WARNING] Output looks like tagless thinking that leaked into the response (no <think>-style tags found)")
+                        if enable_thinking == "Disabled":
+                            troubleshooting_lines.append("[HINT] This model kept thinking despite enable_thinking=Disabled - its chat template likely ignores the enableThinking flag (common for community merges/finetunes)")
+                        troubleshooting_lines.append("[HINT] To fix in LM Studio: set this model's Reasoning Parsing delimiters, or edit its Jinja template to hard-disable thinking ({%- set enable_thinking = false %})")
+                        troubleshooting_lines.append("[HINT] Or, if the model uses a consistent marker, switch reasoning_mode to 'Custom tags' and set the open/close tags")
                     else:
-                        troubleshooting_lines.append("[INFO] No reasoning tags detected")
+                        troubleshooting_lines.append("[INFO] No reasoning tags detected (model may not have used thinking for this query)")
                 elif reasoning_mode == "Custom tags":
                     final_response, reasoning = self._extract_reasoning_custom(response_text, custom_open_tag, custom_close_tag)
 
